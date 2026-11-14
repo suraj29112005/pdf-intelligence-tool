@@ -2,44 +2,120 @@ import React, { useState, useEffect, useRef } from 'react';
 
 const API_BASE = "http://localhost:8000";
 
+// Client-side image compression helper to speed up API response
+const compressImageBeforeSend = (base64Str, maxWidth = 800, maxHeight = 800) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth || height > maxHeight) {
+        if (width > height) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        } else {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.75));
+    };
+  });
+};
+
 export default function FetchApp() {
+  const [user, setUser] = useState(localStorage.getItem("pdf_user") || null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+
   const [documents, setDocuments] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [isGlobalChat, setIsGlobalChat] = useState(false);
-  
-  // Theme State
+
   const [themeColor, setThemeColor] = useState('blue');
-  
-  // AI & Chat States
   const [chatQuestion, setChatQuestion] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Image Analysis State
+  // Image analysis states
   const [selectedImage, setSelectedImage] = useState(null);
+  const [imageQuestion, setImageQuestion] = useState("");
   const [imageAnalysis, setImageAnalysis] = useState("");
+  const [imageLoading, setImageLoading] = useState(false);
 
-  // Refs
   const searchInputRef = useRef(null);
   const chatInputRef = useRef(null);
-  const summaryRef = useRef(null);
-  const galleryRef = useRef(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/documents`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && data.data) {
-          setDocuments(data.data);
-          if (data.data.length > 0 && !selectedDoc) {
-            setSelectedDoc(data.data[0]);
+    if (user) {
+      fetch(`${API_BASE}/documents`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.data) {
+            setDocuments(data.data);
+            if (data.data.length > 0 && !selectedDoc) {
+              setSelectedDoc(data.data[0]);
+            }
           }
+        })
+        .catch((err) => console.error("Error fetching documents:", err));
+    }
+  }, [user]);
+
+  // Automatically select the first image by default so the panel is ALWAYS visible
+  useEffect(() => {
+    if (selectedDoc && selectedDoc.images && selectedDoc.images.length > 0) {
+      setSelectedImage(selectedDoc.images[0]);
+    } else {
+      setSelectedImage(null);
+    }
+    setImageAnalysis("");
+    setImageQuestion("");
+  }, [selectedDoc]);
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    const endpoint = authMode === "login" ? "/login" : "/register";
+    try {
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: authUsername, password: authPassword }),
+      });
+      const data = await response.json();
+      if (response.ok && data.status === "success") {
+        if (authMode === "login") {
+          setUser(data.username);
+          localStorage.setItem("pdf_user", data.username);
+        } else {
+          alert("Registration successful! Please login.");
+          setAuthMode("login");
         }
-      })
-      .catch((err) => console.error("Error fetching documents:", err));
-  }, []);
+      } else {
+        setAuthError(data.detail || data.message || "Authentication failed.");
+      }
+    } catch (err) {
+      setAuthError("Network error. Make sure backend is running.");
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem("pdf_user");
+  };
 
   const handleFileUpload = async (e) => {
     const files = e.target.files;
@@ -52,10 +128,7 @@ export default function FetchApp() {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/upload`, {
-        method: "POST",
-        body: formData,
-      });
+      const response = await fetch(`${API_BASE}/upload`, { method: "POST", body: formData });
       const data = await response.json();
       if (data && data.data) {
         const docRes = await fetch(`${API_BASE}/documents`);
@@ -68,7 +141,6 @@ export default function FetchApp() {
         }
       }
     } catch (err) {
-      console.error("Upload error:", err);
       alert("Upload failed. Check backend terminal.");
     } finally {
       setLoading(false);
@@ -79,9 +151,7 @@ export default function FetchApp() {
   const handleDelete = async (docName, e) => {
     if (e) e.stopPropagation();
     try {
-      const response = await fetch(`${API_BASE}/delete/${encodeURIComponent(docName)}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(`${API_BASE}/delete/${encodeURIComponent(docName)}`, { method: "DELETE" });
       if (response.ok) {
         setDocuments((prev) => prev.filter((d) => d.name !== docName));
         if (selectedDoc?.name === docName) setSelectedDoc(null);
@@ -94,7 +164,6 @@ export default function FetchApp() {
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-
     try {
       const response = await fetch(`${API_BASE}/search?query=${encodeURIComponent(searchQuery)}`);
       const data = await response.json();
@@ -104,16 +173,17 @@ export default function FetchApp() {
     }
   };
 
+  const handleExportCSV = () => {
+    window.open(`${API_BASE}/export/csv?query=${encodeURIComponent(searchQuery)}`, '_blank');
+  };
+
   const handleAskAI = async (e) => {
     e.preventDefault();
     if (!chatQuestion.trim()) return;
-
     const currentQ = chatQuestion;
     setChatQuestion("");
 
     const targetDocName = isGlobalChat ? "GLOBAL_ALL" : (selectedDoc ? selectedDoc.name : "");
-
-    // Optimistic temporary update for instant UI feedback
     let tempHistory = selectedDoc?.chatHistory || [];
     if (!isGlobalChat && selectedDoc) {
       tempHistory = [...tempHistory, { q: currentQ, a: "Thinking..." }];
@@ -124,14 +194,10 @@ export default function FetchApp() {
       const response = await fetch(`${API_BASE}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: currentQ,
-          doc_name: targetDocName,
-        }),
+        body: JSON.stringify({ question: currentQ, doc_name: targetDocName }),
       });
-
       const data = await response.json();
-      
+
       if (!isGlobalChat && selectedDoc && data.history) {
         setSelectedDoc(prev => ({ ...prev, chatHistory: data.history }));
         setDocuments(prev => prev.map(d => d.name === selectedDoc.name ? { ...d, chatHistory: data.history } : d));
@@ -142,30 +208,52 @@ export default function FetchApp() {
         setSelectedDoc(prev => ({ ...prev, chatHistory: updated }));
       }
     } catch (err) {
-      console.error("AI chat network error:", err);
       if (!isGlobalChat && selectedDoc) {
         setSelectedDoc(prev => ({ 
           ...prev, 
-          chatHistory: prev.chatHistory.map(item => item.q === currentQ ? { ...item, a: "Error: Could not connect to AI server." } : item) 
+          chatHistory: prev.chatHistory.map(item => item.q === currentQ ? { ...item, a: "Error connecting to AI." } : item) 
         }));
       }
     }
   };
 
-  const analyzeImage = async (imgBase64) => {
+  const analyzeImage = async (imgBase64, customQ = "") => {
+    setImageLoading(true);
     setSelectedImage(imgBase64);
-    setImageAnalysis("Analyzing image with Gemini AI...");
+    setImageAnalysis("Analyzing image with Groq Vision AI...");
+
     try {
+      const optimizedImg = await compressImageBeforeSend(imgBase64);
+
       const response = await fetch(`${API_BASE}/analyze-image`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_data: imgBase64 }),
+        body: JSON.stringify({ 
+          image_data: optimizedImg,
+          question: customQ,
+          doc_name: selectedDoc ? selectedDoc.name : ""
+        }),
       });
       const data = await response.json();
       setImageAnalysis(data.summary || "Could not analyze image.");
+
+      if (data.imageDescriptions && selectedDoc) {
+        const updatedDoc = { ...selectedDoc, imageDescriptions: data.imageDescriptions };
+        setSelectedDoc(updatedDoc);
+        setDocuments(prev => prev.map(d => d.name === selectedDoc.name ? updatedDoc : d));
+      }
     } catch (err) {
       setImageAnalysis("Error analyzing image.");
+    } finally {
+      setImageLoading(false);
     }
+  };
+
+  const handleImageQuestionSubmit = (e) => {
+    e.preventDefault();
+    if (!selectedImage) return;
+    analyzeImage(selectedImage, imageQuestion);
+    setImageQuestion("");
   };
 
   const getThemeClasses = () => {
@@ -178,18 +266,60 @@ export default function FetchApp() {
 
   const currentTheme = getThemeClasses();
 
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-6">
+        <div className="bg-gray-900 border border-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md space-y-6">
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+              PDF Intelligence & Cloud
+            </h1>
+            <p className="text-xs text-gray-400">Please {authMode === 'login' ? 'login to your account' : 'create a new account'}</p>
+          </div>
+
+          {authError && (
+            <div className="bg-red-950/50 border border-red-900 text-red-300 p-3 rounded-xl text-xs">
+              {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleAuth} className="space-y-4">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Username</label>
+              <input type="text" required value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-purple-500" placeholder="Enter username" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Password</label>
+              <input type="password" required value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-purple-500" placeholder="Enter password" />
+            </div>
+            <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 py-3 rounded-xl font-medium text-sm transition shadow-lg">
+              {authMode === 'login' ? 'Login' : 'Register'}
+            </button>
+          </form>
+
+          <div className="text-center">
+            <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(""); }} className="text-xs text-purple-400 hover:underline">
+              {authMode === 'login' ? "Don't have an account? Register" : "Already have an account? Login"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
       <div className="max-w-7xl mx-auto space-y-6">
-        
+
         <input ref={fileInputRef} type="file" multiple accept=".pdf" onChange={handleFileUpload} className="hidden" />
 
-        {/* Header & Theme Switcher */}
+        {/* Header */}
         <header className="flex justify-between items-center border-b border-gray-800 pb-4">
           <div>
             <h1 className={`text-2xl font-bold bg-gradient-to-r ${currentTheme.primary} bg-clip-text text-transparent`}>
               PDF Intelligence & Cloud Workspace
             </h1>
+            <p className="text-xs text-gray-400 mt-0.5">Welcome back, <span className="text-purple-400 font-semibold">{user}</span></p>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5 bg-gray-900 p-1.5 rounded-xl border border-gray-800">
@@ -198,43 +328,26 @@ export default function FetchApp() {
               <button onClick={() => setThemeColor('violet')} className={`w-5 h-5 rounded-full bg-violet-500 ${themeColor === 'violet' ? 'ring-2 ring-white' : ''}`} title="Violet" />
             </div>
 
-            <button 
-              onClick={() => { setIsGlobalChat(true); setSelectedDoc(null); }}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold border transition ${isGlobalChat ? 'bg-purple-900 border-purple-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-300'}`}
-            >
+            <button onClick={() => { setIsGlobalChat(true); setSelectedDoc(null); }} className={`px-4 py-2 rounded-xl text-xs font-semibold border transition ${isGlobalChat ? 'bg-purple-900 border-purple-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-300'}`}>
               🌐 Global Cross-Chat ({documents.length} Docs)
             </button>
 
             <button onClick={() => fileInputRef.current?.click()} className={`cursor-pointer ${currentTheme.bgBtn} px-5 py-2.5 rounded-xl font-medium transition shadow-lg`}>
               {loading ? "Processing..." : "Upload PDFs"}
             </button>
+
+            <button onClick={handleLogout} className="bg-red-950/40 border border-red-900 hover:bg-red-900/50 text-red-300 px-3 py-2 rounded-xl text-xs transition">
+              Logout
+            </button>
           </div>
         </header>
-
-        {/* Workspace Actions Banner */}
-        <section className="bg-gradient-to-r from-blue-950/40 via-purple-950/40 to-gray-900 border border-blue-900/50 p-4 rounded-2xl shadow-xl">
-          <h2 className={`text-xs font-bold uppercase tracking-wider ${currentTheme.textAccent} mb-3`}>⚡ Clickable Workspace Actions</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-            <button onClick={() => searchInputRef.current?.focus()} className="bg-gray-900/90 border border-gray-800 hover:border-purple-500 p-3 rounded-xl flex items-center space-x-2.5 text-left transition hover:scale-[1.02]">
-              <span className="text-xl">🔍</span><div><p className="font-semibold text-gray-200">Advanced Search</p><p className="text-[11px] text-gray-400">Jump to search</p></div>
-            </button>
-            <button onClick={() => summaryRef.current?.scrollIntoView({ behavior: 'smooth' })} className="bg-gray-900/90 border border-gray-800 hover:border-green-500 p-3 rounded-xl flex items-center space-x-2.5 text-left transition hover:scale-[1.02]">
-              <span className="text-xl">📊</span><div><p className="font-semibold text-gray-200">Metadata & Summary</p><p className="text-[11px] text-gray-400">View doc stats</p></div>
-            </button>
-            <button onClick={() => galleryRef.current?.scrollIntoView({ behavior: 'smooth' })} className="bg-gray-900/90 border border-gray-800 hover:border-yellow-500 p-3 rounded-xl flex items-center space-x-2.5 text-left transition hover:scale-[1.02]">
-              <span className="text-xl">🖼️</span><div><p className="font-semibold text-gray-200">Extracted Gallery</p><p className="text-[11px] text-gray-400">View photos</p></div>
-            </button>
-            <button onClick={() => chatInputRef.current?.focus()} className="bg-gray-900/90 border border-gray-800 hover:border-pink-500 p-3 rounded-xl flex items-center space-x-2.5 text-left transition hover:scale-[1.02]">
-              <span className="text-xl">🤖</span><div><p className="font-semibold text-gray-200">Ask Gemini AI</p><p className="text-[11px] text-gray-400">Jump to chat</p></div>
-            </button>
-          </div>
-        </section>
 
         {/* Search Bar */}
         <section className="bg-gray-900 p-4 rounded-2xl border border-gray-800 shadow-xl">
           <form onSubmit={handleSearch} className="flex gap-4">
             <input ref={searchInputRef} type="text" placeholder="Search text across all saved documents..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500" />
             <button type="submit" className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl font-medium text-sm transition">Search History</button>
+            <button type="button" onClick={handleExportCSV} className="bg-emerald-600 hover:bg-emerald-700 px-4 py-3 rounded-xl font-medium text-sm transition" title="Export Search Results to CSV">📥 Export CSV</button>
           </form>
           {searchResults.length > 0 && (
             <div className="mt-4 space-y-2 max-h-60 overflow-y-auto pr-2">
@@ -249,9 +362,9 @@ export default function FetchApp() {
           )}
         </section>
 
-        {/* Main Grid */}
+        {/* Main Workspace Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
+
           {/* Sidebar */}
           <div className="bg-gray-900 p-4 rounded-2xl border border-gray-800 shadow-xl lg:col-span-1 space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">Saved Documents ({documents.length})</h2>
@@ -269,7 +382,7 @@ export default function FetchApp() {
             </div>
           </div>
 
-          {/* Details & Chat Workspace */}
+          {/* Workspace Details */}
           <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl lg:col-span-2 flex flex-col justify-between space-y-6">
             {isGlobalChat ? (
               <div className="space-y-6">
@@ -278,7 +391,7 @@ export default function FetchApp() {
                   <p className="text-xs text-gray-400 mt-1">You are querying across all {documents.length} uploaded documents simultaneously.</p>
                 </div>
                 <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-400">Ask Gemini AI across all documents</h3>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-400">Ask AI across all documents</h3>
                   <form onSubmit={handleAskAI} className="flex gap-2">
                     <input ref={chatInputRef} type="text" placeholder="Ask anything across your entire library..." value={chatQuestion} onChange={(e) => setChatQuestion(e.target.value)} className="flex-1 bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-purple-500" />
                     <button type="submit" className="bg-purple-600 hover:bg-purple-700 px-5 py-2.5 rounded-xl text-sm font-medium transition">Ask Global</button>
@@ -287,8 +400,9 @@ export default function FetchApp() {
               </div>
             ) : selectedDoc ? (
               <div className="space-y-6">
-                
-                <div ref={summaryRef} className="border-b border-gray-800 pb-4 space-y-4">
+
+                {/* Document Summary & Meta */}
+                <div className="border-b border-gray-800 pb-4 space-y-4">
                   <div className="flex justify-between items-start">
                     <h2 className={`text-xl font-bold ${currentTheme.textAccent}`}>{selectedDoc.name}</h2>
                     <div className="flex gap-2">
@@ -312,12 +426,13 @@ export default function FetchApp() {
                     <div><span className="text-gray-500 block">Total Pages</span><span className="font-semibold text-gray-200">{selectedDoc.pages}</span></div>
                     <div><span className="text-gray-500 block">File Size</span><span className="font-semibold text-gray-200">{selectedDoc.size}</span></div>
                     <div><span className="text-gray-500 block">Word Count</span><span className="font-semibold text-gray-200">{selectedDoc.wordCount}</span></div>
-                    <div><span className="text-gray-500 block">Extracted Images</span><span className="font-semibold text-gray-200">{selectedDoc.imageCount}</span></div>
+                    <div><span className="text-gray-500 block">Extracted Tables</span><span className="font-semibold text-gray-200">{selectedDoc.tables || 0}</span></div>
                   </div>
                 </div>
 
+                {/* AI Document Chat */}
                 <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-400">Ask Gemini AI about this document</h3>
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-400">Ask AI about this document</h3>
                   {selectedDoc.chatHistory && selectedDoc.chatHistory.length > 0 && (
                     <div className="space-y-2 max-h-56 overflow-y-auto pr-1 bg-gray-900/80 p-3 rounded-xl border border-gray-800">
                       {selectedDoc.chatHistory.map((item, idx) => (
@@ -329,14 +444,125 @@ export default function FetchApp() {
                     </div>
                   )}
                   <form onSubmit={handleAskAI} className="flex gap-2">
-                    <input ref={chatInputRef} type="text" placeholder="Ask anything specific from this PDF..." value={chatQuestion} onChange={(e) => setChatQuestion(e.target.value)} className="flex-1 bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-purple-500" />
+                    <input type="text" placeholder="Ask anything specific from this PDF..." value={chatQuestion} onChange={(e) => setChatQuestion(e.target.value)} className="flex-1 bg-gray-900 border border-gray-800 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-purple-500" />
                     <button type="submit" className="bg-purple-600 hover:bg-purple-700 px-5 py-2.5 rounded-xl text-sm font-medium transition">Ask</button>
                   </form>
                 </div>
 
+                {/* Extracted Tables */}
+                {selectedDoc.extractedTables && selectedDoc.extractedTables.length > 0 && (
+                  <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-green-400">📊 Extracted Tables ({selectedDoc.extractedTables.length})</h3>
+                    <div className="max-h-60 overflow-y-auto space-y-3 pr-2">
+                      {selectedDoc.extractedTables.map((tbl, tIdx) => (
+                        <div key={tIdx} className="bg-gray-900 p-3 rounded-xl border border-gray-800 text-xs overflow-x-auto">
+                          <p className="font-semibold text-blue-400 mb-2">Page {tbl.page}</p>
+                          <table className="w-full text-left border-collapse">
+                            <tbody>
+                              {tbl.data.map((row, rIdx) => (
+                                <tr key={rIdx} className="border-b border-gray-800">
+                                  {row.map((cell, cIdx) => (
+                                    <td key={cIdx} className="p-1.5 text-gray-300 border-r border-gray-800 last:border-0">{cell}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Extracted Photos Gallery & Always-Visible Image Analysis Panel */}
+                {selectedDoc.images && selectedDoc.images.length > 0 && (
+                  <div className="space-y-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Extracted Photos & Diagrams ({selectedDoc.images.length})</h3>
+                    <div className="grid grid-cols-4 gap-3 max-h-40 overflow-y-auto pr-1">
+                      {selectedDoc.images.map((img, idx) => (
+                        <div key={idx} className="relative group">
+                          <img 
+                            src={img} 
+                            alt={`Extracted ${idx}`} 
+                            onClick={() => { setSelectedImage(img); setImageAnalysis(""); setImageQuestion(""); }} 
+                            className={`w-full h-20 object-cover rounded-xl border cursor-pointer transition hover:scale-105 ${selectedImage === img ? 'border-blue-500 ring-2 ring-blue-500/50' : 'border-gray-800'}`} 
+                            title="Click to select image" 
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Image Analysis & Question Panel - ALWAYS VISIBLE */}
+                    <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3 mt-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Image Analysis Panel</span>
+                        <span className="text-[10px] text-gray-400">Click any image above to select</span>
+                      </div>
+                      
+                      {selectedImage && (
+                        <div className="flex gap-4 items-start bg-gray-900/50 p-3 rounded-xl border border-gray-800">
+                          <img src={selectedImage} alt="Selected" className="w-24 h-24 object-cover rounded-lg border border-gray-800" />
+                          <div className="flex-1 space-y-2">
+                            <button 
+                              type="button" 
+                              onClick={() => analyzeImage(selectedImage, "")} 
+                              disabled={imageLoading}
+                              className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 px-4 py-2 rounded-xl text-xs font-medium transition text-white shadow"
+                            >
+                              {imageLoading ? "Analyzing..." : "🔍 Analyze Selected Image"}
+                            </button>
+
+                            {imageAnalysis && (
+                              <p className="text-xs text-gray-300 leading-relaxed bg-gray-900 p-3 rounded-xl border border-gray-800">
+                                {imageAnalysis}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Question Asking Area for Image */}
+                      {selectedImage && (
+                        <form onSubmit={handleImageQuestionSubmit} className="flex gap-2 pt-2 border-t border-gray-800">
+                          <input 
+                            type="text" 
+                            placeholder="Ask a specific question about the selected image..." 
+                            value={imageQuestion} 
+                            onChange={(e) => setImageQuestion(e.target.value)} 
+                            className="flex-1 bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500 text-gray-200" 
+                          />
+                          <button 
+                            type="submit" 
+                            disabled={imageLoading}
+                            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 rounded-xl text-xs font-medium transition text-white"
+                          >
+                            {imageLoading ? "Processing..." : "Ask Image"}
+                          </button>
+                        </form>
+                      )}
+                    </div>
+
+                    {/* Saved & Retrieved Image Analyses */}
+                    {selectedDoc.imageDescriptions && selectedDoc.imageDescriptions.length > 0 && (
+                      <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-2 mt-3">
+                        <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Saved Image Analyses ({selectedDoc.imageDescriptions.length})</h4>
+                        <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                          {selectedDoc.imageDescriptions.map((item, idx) => (
+                            <div key={idx} className="bg-gray-900 p-3 rounded-xl border border-gray-800 text-xs space-y-1">
+                              <p className="text-blue-300 font-medium">Q: {item.question || "Detailed Analysis"}</p>
+                              <p className="text-gray-300 leading-relaxed">A: {item.description}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Page-wise Text / OCR Viewer */}
                 {selectedDoc.textContent && selectedDoc.textContent.length > 0 && (
                   <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">📖 Page-wise Document Viewer</h3>
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">📖 Page-wise Document Viewer (OCR & Text)</h3>
                     <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
                       {selectedDoc.textContent.map((pageObj, pIdx) => (
                         <details key={pIdx} className="bg-gray-900 p-3 rounded-xl border border-gray-800 text-xs">
@@ -348,28 +574,11 @@ export default function FetchApp() {
                   </div>
                 )}
 
-                {selectedDoc.images && selectedDoc.images.length > 0 && (
-                  <div ref={galleryRef} className="space-y-3">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Extracted Photos & Diagrams ({selectedDoc.images.length})</h3>
-                    <div className="grid grid-cols-4 gap-3 max-h-40 overflow-y-auto pr-1">
-                      {selectedDoc.images.map((img, idx) => (
-                        <img key={idx} src={img} alt={`Extracted ${idx}`} onClick={() => analyzeImage(img)} className="w-full h-20 object-cover rounded-xl border border-gray-800 cursor-pointer hover:border-blue-500 transition hover:scale-105" title="Click to analyze" />
-                      ))}
-                    </div>
-                    {selectedImage && (
-                      <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-2 mt-2">
-                        <div className="flex justify-between items-center"><span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Image Analysis</span><button onClick={() => setSelectedImage(null)} className="text-gray-500 hover:text-gray-300 text-xs">✕ Close</button></div>
-                        <div className="flex gap-4 items-start"><img src={selectedImage} alt="Selected" className="w-24 h-24 object-cover rounded-lg border border-gray-800" /><p className="text-xs text-gray-300 leading-relaxed flex-1">{imageAnalysis}</p></div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-gray-500 py-32 space-y-2">
                 <span className="text-4xl">📄</span>
-                <p className="text-sm">Select a document from the left list to view summary, text viewer, and AI chat.</p>
+                <p className="text-sm">Select a document from the left list to view summary, tables, and AI chat.</p>
               </div>
             )}
           </div>
