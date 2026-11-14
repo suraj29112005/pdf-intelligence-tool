@@ -7,3 +7,4 @@ python-dotenv
 cloudinary
 openai
 pydantic
+python-multipart
