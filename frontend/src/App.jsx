@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = "https://pdf-intelligence-backend-npl1.onrender.com";
 
 // Client-side image compression helper to speed up API response
 const compressImageBeforeSend = (base64Str, maxWidth = 800, maxHeight = 800) => {
