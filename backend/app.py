@@ -20,9 +20,6 @@ import cloudinary.api
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# ==============================
-# OCR CONFIGURATION
-# ==============================
 try:
     import pytesseract
     from PIL import Image
@@ -39,26 +36,19 @@ except ImportError:
 except Exception:
     OCR_AVAILABLE = False
 
-# ==============================
-# ENVIRONMENT CONFIGURATION
-# ==============================
 env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path)
 
 groq_api_key = os.getenv("GROQ_API_KEY")
 
-# ==============================
-# CLOUDINARY CONFIGURATION
-# ==============================
+
 cloudinary.config(
     cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
     api_key=os.getenv("CLOUDINARY_API_KEY"),
     api_secret=os.getenv("CLOUDINARY_API_SECRET")
 )
 
-# ==============================
-# GROQ CLIENT
-# ==============================
+
 client = None
 if groq_api_key:
     try:
@@ -70,9 +60,6 @@ if groq_api_key:
     except Exception as e:
         print(f"Groq Client Init Error: {e}")
 
-# ==============================
-# FASTAPI APP
-# ==============================
 app = FastAPI()
 
 app.add_middleware(
@@ -84,9 +71,6 @@ app.add_middleware(
 
 DB_FILE = "pdf_database.db"
 
-# ==============================
-# IMAGE COMPRESSION HELPER (FOR SPEED)
-# ==============================
 def compress_image(base64_str, max_size=(800, 800)):
     """Compresses base64 image to reduce payload size and speed up API response."""
     try:
@@ -108,14 +92,10 @@ def compress_image(base64_str, max_size=(800, 800)):
         print(f"Image compression failed: {e}")
         return base64_str
 
-# ==============================
-# AI IMAGE RECOGNITION HELPER
-# ==============================
 def analyze_image_custom(image_data, user_question=""):
     if not client:
         return "AI recognition unavailable: GROQ_API_KEY not configured."
 
-    # Compress image before sending to Groq Vision API for faster processing
     optimized_image_data = compress_image(image_data)
 
     if user_question.strip():
@@ -146,7 +126,7 @@ def analyze_image_custom(image_data, user_question=""):
                 }
             ],
             temperature=0.2,
-            max_tokens=150  # Reduced max_tokens for faster generation speed
+            max_tokens=150  
         )
         return response.choices[0].message.content or "No description returned."
     except Exception as e:
@@ -154,9 +134,6 @@ def analyze_image_custom(image_data, user_question=""):
         return f"Image recognition failed: {str(e)}"
 
 
-# ==============================
-# DATABASE INITIALIZATION
-# ==============================
 def init_db():
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
     cursor = conn.cursor()
@@ -200,9 +177,7 @@ def init_db():
 
 init_db()
 
-# ==============================
-# PYDANTIC MODELS
-# ==============================
+
 class ChatRequest(BaseModel):
     question: str
     doc_name: str = ""
@@ -216,9 +191,6 @@ class AuthRequest(BaseModel):
     username: str
     password: str
 
-# ==============================
-# SUMMARY GENERATION
-# ==============================
 def generate_summary(text_content):
     all_text = " ".join(
         [p["text"] for p in text_content]
@@ -234,10 +206,6 @@ def generate_summary(text_content):
         if sentences
         else "Not enough text to summarize."
     )
-
-# ==============================
-# CLOUDINARY BACKGROUND UPLOAD
-# ==============================
 def upload_to_cloudinary_background(
     file_bytes,
     safe_public_id,
@@ -269,9 +237,6 @@ def upload_to_cloudinary_background(
     except Exception as ce:
         print(f"Cloudinary background upload failed: {ce}")
 
-# ==============================
-# REGISTER
-# ==============================
 @app.post("/register")
 def register_user(req: AuthRequest):
     hashed_password = hashlib.sha256(
@@ -304,9 +269,6 @@ def register_user(req: AuthRequest):
             "message": str(e)
         }
 
-# ==============================
-# LOGIN
-# ==============================
 @app.post("/login")
 def login_user(req: AuthRequest):
     hashed_password = hashlib.sha256(
@@ -336,9 +298,7 @@ def login_user(req: AuthRequest):
         detail="Invalid username or password"
     )
 
-# ==============================
-# PDF UPLOAD + OCR
-# ==============================
+
 @app.post("/upload")
 async def upload_files(
     files: list[UploadFile] = File(...)
@@ -540,9 +500,6 @@ async def upload_files(
         traceback.print_exc()
         return {"error": str(e)}
 
-# ==============================
-# GET ALL DOCUMENTS
-# ==============================
 @app.get("/documents")
 def get_all_documents():
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -590,9 +547,6 @@ def get_all_documents():
         })
     return {"data": docs}
 
-# ==============================
-# SEARCH DOCUMENTS
-# ==============================
 @app.get("/search")
 def search_documents(
     query: str,
@@ -635,9 +589,6 @@ def search_documents(
                 })
     return {"results": search_results}
 
-# ==============================
-# EXPORT SEARCH RESULTS AS CSV
-# ==============================
 @app.get("/export/csv")
 def export_csv(query: str = ""):
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -666,9 +617,7 @@ def export_csv(query: str = ""):
         }
     )
 
-# ==============================
-# DELETE DOCUMENT
-# ==============================
+
 @app.delete("/delete/{doc_name}")
 def delete_document(doc_name: str):
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -686,9 +635,7 @@ def delete_document(doc_name: str):
     conn.close()
     return {"message": "Deleted successfully"}
 
-# ==============================
-# GROQ GPT CHAT ENDPOINT
-# ==============================
+
 @app.post("/ask")
 def ask_question(req: ChatRequest):
     if not client:
@@ -756,9 +703,7 @@ def ask_question(req: ChatRequest):
         existing_chat.append({"q": req.question, "a": error_msg})
         return {"answer": error_msg, "history": existing_chat}
 
-# ==============================
-# EXPORT CHAT HISTORY
-# ==============================
+
 @app.get("/export/{doc_name}", response_class=PlainTextResponse)
 def export_chat(doc_name: str):
     conn = sqlite3.connect(DB_FILE, timeout=30.0)
@@ -777,9 +722,6 @@ def export_chat(doc_name: str):
         report += f"\nQ{idx}: {c['q']}\nA{idx}: {c['a']}\n" + "-" * 40
     return report
 
-# ==============================
-# GROQ VISION IMAGE ANALYSIS WITH SAVING & RETRIEVAL
-# ==============================
 @app.post("/analyze-image")
 def analyze_img(req: ImageRequest):
     if not client:

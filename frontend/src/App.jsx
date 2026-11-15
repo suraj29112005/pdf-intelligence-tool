@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 const API_BASE = "https://pdf-intelligence-backend-npl1.onrender.com";
-
-// Client-side image compression helper to speed up API response
 const compressImageBeforeSend = (base64Str, maxWidth = 800, maxHeight = 800) => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -73,8 +71,6 @@ export default function FetchApp() {
         .catch((err) => console.error("Error fetching documents:", err));
     }
   }, [user]);
-
-  // Automatically select the first image by default so the panel is ALWAYS visible
   useEffect(() => {
     if (selectedDoc && selectedDoc.images && selectedDoc.images.length > 0) {
       setSelectedImage(selectedDoc.images[0]);
@@ -313,7 +309,6 @@ export default function FetchApp() {
 
         <input ref={fileInputRef} type="file" multiple accept=".pdf" onChange={handleFileUpload} className="hidden" />
 
-        {/* Header */}
         <header className="flex justify-between items-center border-b border-gray-800 pb-4">
           <div>
             <h1 className={`text-2xl font-bold bg-gradient-to-r ${currentTheme.primary} bg-clip-text text-transparent`}>
@@ -342,7 +337,6 @@ export default function FetchApp() {
           </div>
         </header>
 
-        {/* Search Bar */}
         <section className="bg-gray-900 p-4 rounded-2xl border border-gray-800 shadow-xl">
           <form onSubmit={handleSearch} className="flex gap-4">
             <input ref={searchInputRef} type="text" placeholder="Search text across all saved documents..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="flex-1 bg-gray-950 border border-gray-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500" />
@@ -362,10 +356,8 @@ export default function FetchApp() {
           )}
         </section>
 
-        {/* Main Workspace Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* Sidebar */}
           <div className="bg-gray-900 p-4 rounded-2xl border border-gray-800 shadow-xl lg:col-span-1 space-y-4">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400">Saved Documents ({documents.length})</h2>
             <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
@@ -382,7 +374,6 @@ export default function FetchApp() {
             </div>
           </div>
 
-          {/* Workspace Details */}
           <div className="bg-gray-900 p-6 rounded-2xl border border-gray-800 shadow-xl lg:col-span-2 flex flex-col justify-between space-y-6">
             {isGlobalChat ? (
               <div className="space-y-6">
@@ -401,7 +392,6 @@ export default function FetchApp() {
             ) : selectedDoc ? (
               <div className="space-y-6">
 
-                {/* Document Summary & Meta */}
                 <div className="border-b border-gray-800 pb-4 space-y-4">
                   <div className="flex justify-between items-start">
                     <h2 className={`text-xl font-bold ${currentTheme.textAccent}`}>{selectedDoc.name}</h2>
@@ -430,7 +420,6 @@ export default function FetchApp() {
                   </div>
                 </div>
 
-                {/* AI Document Chat */}
                 <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-purple-400">Ask AI about this document</h3>
                   {selectedDoc.chatHistory && selectedDoc.chatHistory.length > 0 && (
@@ -449,7 +438,6 @@ export default function FetchApp() {
                   </form>
                 </div>
 
-                {/* Extracted Tables */}
                 {selectedDoc.extractedTables && selectedDoc.extractedTables.length > 0 && (
                   <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-green-400">📊 Extracted Tables ({selectedDoc.extractedTables.length})</h3>
@@ -474,7 +462,6 @@ export default function FetchApp() {
                   </div>
                 )}
 
-                {/* Extracted Photos Gallery & Always-Visible Image Analysis Panel */}
                 {selectedDoc.images && selectedDoc.images.length > 0 && (
                   <div className="space-y-3">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Extracted Photos & Diagrams ({selectedDoc.images.length})</h3>
@@ -492,7 +479,6 @@ export default function FetchApp() {
                       ))}
                     </div>
 
-                    {/* Image Analysis & Question Panel - ALWAYS VISIBLE */}
                     <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3 mt-2">
                       <div className="flex justify-between items-center">
                         <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Image Analysis Panel</span>
@@ -521,7 +507,6 @@ export default function FetchApp() {
                         </div>
                       )}
 
-                      {/* Question Asking Area for Image */}
                       {selectedImage && (
                         <form onSubmit={handleImageQuestionSubmit} className="flex gap-2 pt-2 border-t border-gray-800">
                           <input 
@@ -542,7 +527,6 @@ export default function FetchApp() {
                       )}
                     </div>
 
-                    {/* Saved & Retrieved Image Analyses */}
                     {selectedDoc.imageDescriptions && selectedDoc.imageDescriptions.length > 0 && (
                       <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-2 mt-3">
                         <h4 className="text-xs font-semibold text-blue-400 uppercase tracking-wider">Saved Image Analyses ({selectedDoc.imageDescriptions.length})</h4>
@@ -559,7 +543,6 @@ export default function FetchApp() {
                   </div>
                 )}
 
-                {/* Page-wise Text / OCR Viewer */}
                 {selectedDoc.textContent && selectedDoc.textContent.length > 0 && (
                   <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 space-y-3">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">📖 Page-wise Document Viewer (OCR & Text)</h3>
